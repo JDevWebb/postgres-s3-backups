@@ -34,9 +34,34 @@ A simple NodeJS application to backup your PostgreSQL database to S3 via a cron.
 
 - `BACKUP_OPTIONS` - Add any valid pg_dump option, supported pg_dump options can be found [here](https://www.postgresql.org/docs/current/app-pgdump.html). Example: `--exclude-table=pattern`
 
+- `ENABLE_ENCRYPTION` - Enable encryption for database backups. Default `false`. When enabled, backup files will be encrypted using AES-256-GCM before upload to S3.
+
+- `ENCRYPTION_KEY` - Encryption key for database backups. Required when `ENABLE_ENCRYPTION` is `true`. The key is hashed using SHA-256 to derive the encryption key.
+
 - `NODE_VERSION` - Specify a custom Node.js version to override the default version set in the Dockerfile.
 
 - `PG_VERSION` - Specify a custom PostgreSQL version to override the default version set in the Dockerfile.
+
+## Encryption
+
+When `ENABLE_ENCRYPTION` is set to `true`, backup files are encrypted using **AES-256-GCM** before being uploaded to S3. Encrypted files have a `.enc` extension appended to the filename (e.g., `backup-2024-01-01T12-00-00-000Z.tar.gz.enc`).
+
+### Encryption Format
+
+The encrypted file format is:
+- **IV (Initialization Vector)**: 16 bytes at the beginning
+- **Authentication Tag**: 16 bytes following the IV
+- **Encrypted Data**: The rest of the file contains the encrypted backup data
+
+The encryption key is derived from the `ENCRYPTION_KEY` environment variable using SHA-256 hashing.
+
+### Decryption
+
+To decrypt a backup file, you'll need:
+1. The encrypted backup file (downloaded from S3)
+2. The same `ENCRYPTION_KEY` that was used to encrypt the file
+
+See [DECRYPTION.md](./DECRYPTION.md) for detailed decryption instructions and example code.
 
 ## Notes for Postgres 17
 

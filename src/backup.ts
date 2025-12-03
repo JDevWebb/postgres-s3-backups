@@ -1,10 +1,11 @@
 import { exec, execSync } from "child_process";
 import { S3Client, S3ClientConfig, PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { createReadStream, unlink, statSync } from "fs";
+import { createReadStream, unlink, statSync, createWriteStream, readFileSync } from "fs";
 import { filesize } from "filesize";
 import path from "path";
 import os from "os";
+import crypto from "crypto";
 
 import { env } from "./env.js";
 import { createMD5 } from "./util.js";
@@ -103,17 +104,70 @@ const deleteFile = async (path: string) => {
   });
 }
 
+const encryptFile = async (inputPath: string, outputPath: string): Promise<void> => {
+  console.log("Encrypting backup file...");
+
+  if (!env.ENCRYPTION_KEY) {
+    throw new Error("ENCRYPTION_KEY is required when encryption is enabled");
+  }
+
+  // Derive a 32-byte key from the encryption key using SHA-256
+  const key = crypto.createHash('sha256').update(env.ENCRYPTION_KEY).digest();
+
+  // Generate a random 16-byte IV for AES-256-GCM
+  const iv = crypto.randomBytes(16);
+
+  // Create cipher
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+  // Read the input file
+  const inputData = readFileSync(inputPath);
+
+  // Encrypt the data
+  let encrypted = cipher.update(inputData);
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+
+  // Get the authentication tag
+  const authTag = cipher.getAuthTag();
+
+  // Write IV (16 bytes) + authTag (16 bytes) + encrypted data to output file
+  const output = createWriteStream(outputPath);
+  output.write(iv);
+  output.write(authTag);
+  output.write(encrypted);
+  output.end();
+
+  await new Promise((resolve, reject) => {
+    output.on('finish', () => {
+      console.log("Backup file encrypted");
+      resolve(undefined);
+    });
+    output.on('error', reject);
+  });
+}
+
 export const backup = async () => {
   console.log("Initiating DB backup...");
 
   const date = new Date().toISOString();
   const timestamp = date.replace(/[:.]+/g, '-');
-  const filename = `${env.BACKUP_FILE_PREFIX}-${timestamp}.tar.gz`;
-  const filepath = path.join(os.tmpdir(), filename);
+  const baseFilename = `${env.BACKUP_FILE_PREFIX}-${timestamp}.tar.gz`;
+  const filename = env.ENABLE_ENCRYPTION ? `${baseFilename}.enc` : baseFilename;
+  const filepath = path.join(os.tmpdir(), baseFilename);
+  const finalFilepath = env.ENABLE_ENCRYPTION ? path.join(os.tmpdir(), filename) : filepath;
 
   await dumpToFile(filepath);
-  await uploadToS3({ name: filename, path: filepath });
-  await deleteFile(filepath);
+
+  if (env.ENABLE_ENCRYPTION) {
+    if (!env.ENCRYPTION_KEY) {
+      throw new Error("ENCRYPTION_KEY is required when ENABLE_ENCRYPTION is true");
+    }
+    await encryptFile(filepath, finalFilepath);
+    await deleteFile(filepath); // Delete the unencrypted file
+  }
+
+  await uploadToS3({ name: filename, path: finalFilepath });
+  await deleteFile(finalFilepath);
 
   console.log("DB backup complete...");
 }

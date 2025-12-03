@@ -52,4 +52,14 @@ export const env = envsafe({
     default: '',
     allowEmpty: true,
   }),
+  ENABLE_ENCRYPTION: bool({
+    desc: 'Enable encryption for database backups',
+    default: false,
+    allowEmpty: true,
+  }),
+  ENCRYPTION_KEY: str({
+    desc: 'Encryption key for database backups (required if ENABLE_ENCRYPTION is true)',
+    default: '',
+    allowEmpty: true,
+  }),
 })
