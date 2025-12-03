@@ -383,10 +383,18 @@ const decryptFile = async (encryptedPath: string, decryptedPath: string): Promis
     console.log("Backup file decrypted successfully");
     console.log(`Decrypted file size: ${filesize(decrypted.length)}`);
   } catch (error: any) {
-    if (error.message && (error.message.includes('Unsupported state') || error.message.includes('unable to authenticate'))) {
-      throw new Error('Decryption failed: Invalid encryption key or corrupted file. Please verify your encryption key matches the one used during encryption.');
+    let errorMessage = 'Decryption failed';
+    
+    if (error.message) {
+      if (error.message.includes('Unsupported state') || error.message.includes('unable to authenticate')) {
+        errorMessage = 'Decryption failed: Invalid encryption key or corrupted file. Please verify your encryption key matches the one used during encryption.';
+      } else {
+        errorMessage = `Decryption failed: ${error.message}`;
+      }
     }
-    throw error;
+    
+    console.error(errorMessage);
+    throw new Error(errorMessage);
   }
 }
 
@@ -443,9 +451,20 @@ export const restore = async () => {
     // Decrypt if needed
     if (isEncrypted) {
       const decryptedPath = downloadedPath.replace(/\.enc$/, '');
-      await decryptFile(downloadedPath, decryptedPath);
-      await deleteFile(downloadedPath); // Delete encrypted file
-      finalBackupPath = decryptedPath;
+      try {
+        await decryptFile(downloadedPath, decryptedPath);
+        await deleteFile(downloadedPath); // Delete encrypted file
+        finalBackupPath = decryptedPath;
+      } catch (error: any) {
+        // Clean up downloaded file on decryption failure
+        try {
+          await deleteFile(downloadedPath);
+        } catch (cleanupError) {
+          // Ignore cleanup errors
+        }
+        // Re-throw to ensure process exits
+        throw error;
+      }
     }
 
     // Restore the database
